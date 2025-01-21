@@ -123,6 +123,11 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     rotations_final = pc.rotation_activation(rotations_final)
     opacity = pc.opacity_activation(opacity)
 
+    means3D_final = means3D.cuda()
+    rotations_final = rotations.cuda()
+    scales_final = scales.cuda()
+    opacity_final = opacity.cuda()
+
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
     shs = None
