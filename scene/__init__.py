@@ -64,6 +64,11 @@ class Scene:
         # self.gaussians._deformation.deformation_net.grid.set_aabb(xyz_max,xyz_min)
 
         if self.loaded_iter:
+            # model is saved as GS unique ply file format
+            # brief summary of format: representing Guassians as vertices(point) at its center 
+            #                          with custom attributes being all learnable paramters except 3Dmean instead of general attr such as color
+            #                          (including _coef since we also have one for each guassian)
+            # method .load_ply() used parse this file format
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
