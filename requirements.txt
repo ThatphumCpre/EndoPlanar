@@ -9,3 +9,4 @@ plyfile
 imageio-ffmpeg
 open3d
 imageio
+pytorch3d

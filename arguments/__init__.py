@@ -110,21 +110,38 @@ class OptimizationParams(ParamGroup):
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
-        self.weight_constraint_init= 1
-        self.weight_constraint_after = 0.2
-        self.weight_decay_iteration = 5000
-        self.opacity_reset_interval = 3000
+
         self.densification_interval = 100
+        self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold_coarse = 0.0002
         self.densify_grad_threshold_fine_init = 0.0002
         self.densify_grad_threshold_after = 0.0002
-        self.pruning_from_iter = 500
-        self.pruning_interval = 100
+
+        self.scale_loss_weight = 100.0
+        self.wo_image_weight = False
+        self.single_view_weight = 0.015
+        self.single_view_weight_from_iter = 7000
+
         self.opacity_threshold_coarse = 0.005
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
+
+        # self.densify_abs_grad_threshold = 0.0008
+        self.densify_grad_threshold_abs_fine_init = 0.0008
+        self.densify_grad_threshold_abs_after = 0.0008
+        self.densify_grad_threshold_abs_coarse = 0.0008
+
+        self.abs_split_radii2D_threshold = 20
+        self.max_abs_split_points = 50_000
+        self.max_all_points = 6000_000
+
+        self.weight_constraint_init= 1
+        self.weight_constraint_after = 0.2
+        self.weight_decay_iteration = 5000
+        self.pruning_from_iter = 500
+        self.pruning_interval = 100
         
         super().__init__(parser, "Optimization Parameters")
 
