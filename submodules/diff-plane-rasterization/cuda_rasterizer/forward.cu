@@ -466,6 +466,14 @@ void FORWARD::render(
 		out_all_map,
 		out_plane_depth,
 		render_geo);
+	cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        // Print the error before returning
+        printf("[DEBUG] Error after renderCUDA kernel: %s\n", cudaGetErrorString(err));
+    }
+    else {
+        printf("[DEBUG] renderCUDA finished successfully.\n");
+    }
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -522,4 +530,13 @@ void FORWARD::preprocess(int P, int D, int M,
 		tiles_touched,
 		prefiltered
 		);
+
+	cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        // Print the error before returning
+        printf("[DEBUG] Error after preprocessCUDA kernel: %s\n", cudaGetErrorString(err));
+    }
+    else {
+        printf("[DEBUG] preprocessCUDA finished successfully.\n");
+    }
 }
