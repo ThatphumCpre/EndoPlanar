@@ -179,9 +179,9 @@ class GaussianModel:
             return smallest_axis.squeeze(dim=2), smallest_axis_idx[..., 0, 0]
         return smallest_axis.squeeze(dim=2)
 
-    def get_normal(self, means3D_deform, scales_deform, rotations_deform, view_cam):
+    def get_normal(self, means3D_deform, scales_deform, rotations_deform, camera_center):
         normal_global = self.get_smallest_axis(rotations_deform, scales_deform)
-        gaussian_to_cam_global = view_cam.camera_center - means3D_deform
+        gaussian_to_cam_global = camera_center - means3D_deform
         neg_mask = (normal_global * gaussian_to_cam_global).sum(-1) < 0.0
         normal_global[neg_mask] = -normal_global[neg_mask]
         return normal_global

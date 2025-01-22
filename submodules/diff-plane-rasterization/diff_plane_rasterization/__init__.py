@@ -64,27 +64,27 @@ class _RasterizeGaussians(torch.autograd.Function):
 
         # Restructure arguments the way that the C++ lib expects them
         args = (
-            raster_settings.bg, 
-            means3D,
-            colors_precomp,
-            opacities,
-            scales,
-            rotations,
-            raster_settings.scale_modifier,
-            cov3Ds_precomp,
-            all_maps,
-            raster_settings.viewmatrix,
-            raster_settings.projmatrix,
-            raster_settings.tanfovx,
-            raster_settings.tanfovy,
-            raster_settings.image_height,
-            raster_settings.image_width,
-            sh,
-            raster_settings.sh_degree,
-            raster_settings.campos,
-            raster_settings.prefiltered,
-            raster_settings.render_geo,
-            raster_settings.debug
+            raster_settings.bg, #0
+            means3D, #1
+            colors_precomp, #2
+            opacities, #3
+            scales, #4
+            rotations, #5
+            raster_settings.scale_modifier, #6
+            cov3Ds_precomp, #7
+            all_maps, #8
+            raster_settings.viewmatrix, #9
+            raster_settings.projmatrix, #10
+            raster_settings.tanfovx,#11
+            raster_settings.tanfovy,#12
+            raster_settings.image_height,#13
+            raster_settings.image_width,#14
+            sh,#15
+            raster_settings.sh_degree,#16
+            raster_settings.campos,#17
+            raster_settings.prefiltered,#18
+            raster_settings.render_geo,#19
+            raster_settings.debug#20
         )
 
         # Invoke C++/CUDA rasterizer

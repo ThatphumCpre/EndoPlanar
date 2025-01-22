@@ -165,9 +165,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         return return_dict
 
     # TODO: modify get_normal from deform
-    global_normal = pc.get_normal(means3D_final, scales_final, rotations_final, viewpoint_camera)
-    local_normal = global_normal @ viewpoint_camera.world_view_transform[:3,:3]
-    pts_in_cam = means3D_final @ viewpoint_camera.world_view_transform[:3,:3] + viewpoint_camera.world_view_transform[3,:3]
+    camera_center = viewpoint_camera.camera_center.cuda()
+    world_view_transform = viewpoint_camera.world_view_transform.cuda()
+
+    global_normal = pc.get_normal(means3D_final, scales_final, rotations_final, camera_center)
+    local_normal = global_normal @ world_view_transform[:3,:3]
+    pts_in_cam = means3D_final @ world_view_transform[:3,:3] + world_view_transform[3,:3]
     depth_z = pts_in_cam[:, 2]
     local_distance = (local_normal * pts_in_cam).sum(-1).abs()
     input_all_map = torch.zeros((means3D_final.shape[0], 5)).cuda().float()
