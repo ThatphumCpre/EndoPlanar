@@ -21,7 +21,21 @@ from utils.graphics_utils import normal_from_depth_image
 def render_normal(viewpoint_cam, depth, offset=None, normal=None, scale=1):
     # depth: (H, W), bg_color: (3), alpha: (H, W)
     # normal_ref: (3, H, W)
-    intrinsic_matrix, extrinsic_matrix = viewpoint_cam.get_calib_matrix_nerf(scale=scale)
+    w = viewpoint_cam.image_width
+    h = viewpoint_cam.image_height
+    fx = w / (2.0 * math.tan(viewpoint_cam.FoVx / 2.0))  # focal length x
+    fy = h / (2.0 * math.tan(viewpoint_cam.FoVy / 2.0))  # focal length y
+    cx = w / 2.0
+    cy = h / 2.0
+    
+    intrinsic_matrix = torch.tensor([
+        [fx/scale,  0,        cx/scale],
+        [ 0      , fy/scale,  cy/scale],
+        [ 0      ,  0,               1]
+    ]).float()
+    extrinsic_matrix = viewpoint_cam.world_view_transform.transpose(0,1).contiguous() # cam2world
+    # return intrinsic_matrix, extrinsic_matrix
+    # intrinsic_matrix, extrinsic_matrix = viewpoint_cam.get_calib_matrix_nerf(scale=scale)
     st = max(int(scale/2)-1,0)
     if offset is not None:
         offset = offset[st::scale,st::scale]
@@ -33,7 +47,7 @@ def render_normal(viewpoint_cam, depth, offset=None, normal=None, scale=1):
     return normal_ref
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, 
-           return_plane = True, return_depth_normal = True):
+           return_plane =True, return_depth_normal = True):
 
     """
     Render the scene. 
@@ -56,7 +70,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # Set up rasterization configuration
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
-
+    camera_center = viewpoint_camera.camera_center.cuda()
+    world_view_transform = viewpoint_camera.world_view_transform.cuda()
+    full_proj_transform = viewpoint_camera.full_proj_transform.cuda()
     raster_settings = PlaneGaussianRasterizationSettings(
             image_height=int(viewpoint_camera.image_height),
             image_width=int(viewpoint_camera.image_width),
@@ -64,10 +80,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             tanfovy=tanfovy,
             bg=bg_color,
             scale_modifier=scaling_modifier,
-            viewmatrix=viewpoint_camera.world_view_transform,
-            projmatrix=viewpoint_camera.full_proj_transform,
+            viewmatrix=world_view_transform,
+            projmatrix=full_proj_transform,
             sh_degree=pc.active_sh_degree,
-            campos=viewpoint_camera.camera_center,
+            campos=camera_center,
             prefiltered=False,
             render_geo=return_plane,
             debug=pipe.debug
@@ -120,13 +136,14 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     opacity_final[~deformation_point] = opacity[~deformation_point]
 
     scales_final = pc.scaling_activation(scales_final)
+    # print("\n\n\n\n", scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
-    opacity = pc.opacity_activation(opacity)
+    opacity_final = pc.opacity_activation(opacity)
 
-    means3D_final = means3D.cuda()
-    rotations_final = rotations.cuda()
-    scales_final = scales.cuda()
-    opacity_final = opacity.cuda()
+    # means3D_final = means3D_final.cuda()
+    # rotations_final = rotations_final.cuda()
+    # scales_final = scales_final.cuda()
+    # opacity_final = opacity_final.cuda()
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
@@ -145,13 +162,13 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         colors_precomp = override_color
 
     if not return_plane:
-        rendered_image, radii, out_observe, _, _ = rasterizer(
+        rendered_image, radii, out_observe, out_all_map, plane_depth = rasterizer(
             means3D = means3D_final,
             means2D = means2D,
             means2D_abs = means2D_abs,
             shs = shs,
             colors_precomp = colors_precomp,
-            opacities = opacity,
+            opacities = opacity_final,
             scales = scales_final,
             rotations = rotations_final,
             cov3D_precomp = cov3D_precomp)
@@ -162,9 +179,21 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
                         "visibility_filter" : radii > 0,
                         "radii": radii,
                         "out_observe": out_observe}
+
         return return_dict
 
     # TODO: modify get_normal from deform
+
+    # print(means3D_final.shape, means3D_final.device)
+    # print(means2D.shape, means2D.device)
+    # print(means2D_abs.shape, means2D_abs.device)
+    # print(shs.shape, shs.device)
+    # # print(colors_precomp.shape, colors_precomp.device)
+    # print(opacity_final.shape, opacity_final.device)
+    # print(scales_final.shape, scales_final.device)
+    # print(rotations_final.shape, rotations_final.device)
+    # print(input_all_map.shape, input_all_map.device)
+    # # print(cov3D_precomp.shape, cov3D_precomp.device)
     camera_center = viewpoint_camera.camera_center.cuda()
     world_view_transform = viewpoint_camera.world_view_transform.cuda()
 
@@ -177,6 +206,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     input_all_map[:, :3] = local_normal
     input_all_map[:, 3] = 1.0
     input_all_map[:, 4] = local_distance
+    
 
     rendered_image, radii, out_observe, out_all_map, plane_depth = rasterizer(
             means3D = means3D_final,
@@ -184,7 +214,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             means2D_abs = means2D_abs,
             shs = shs,
             colors_precomp = colors_precomp,
-            opacities = opacity,
+            opacities = opacity_final,
             scales = scales_final,
             rotations = rotations_final,
             all_map = input_all_map,

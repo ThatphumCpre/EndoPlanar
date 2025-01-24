@@ -211,11 +211,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		computeCov3D(scales[idx], scale_modifier, rotations[idx], cov3Ds + idx * 6);
 		cov3D = cov3Ds + idx * 6;
 	}
-    printf("%d: computeCov3D complete", idx);
 
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
-    printf("%d: computeCov2D complete", idx);
 
 	// Invert covariance (EWA algorithm)
 	float det = (cov.x * cov.z - cov.y * cov.y);
@@ -235,18 +233,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	uint2 rect_min, rect_max;
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
-
-    // Debuging
-    uint area = (rect_max.x - rect_min.x) * (rect_max.y - rect_min.y);
-    tiles_touched[idx] = area;
-    
-    // Only print if the area is large, to avoid spamming the console.
-    if (area > 10000 && idx < 10) {  // threshold & sample-limiting
-        printf("[DEBUG] Gaussian %d -> area = %u, my_radius=%.2f\n", idx, area, my_radius);
-        printf("         rect_min=(%u, %u), rect_max=(%u, %u)\n",
-               rect_min.x, rect_min.y, rect_max.x, rect_max.y);
-    }
-
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
 		return;
 
@@ -259,7 +245,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		rgb[idx * C + 1] = result.y;
 		rgb[idx * C + 2] = result.z;
 	}
-    printf("%d: computeColorFromSH complete", idx);
 
 	// if (opacities[idx] > 0.9 && point_image.x > 0 && point_image.x < 1264 && point_image.y > 0 && point_image.y < 832) {
 	// 	glm::vec4 q = rotations[idx];
@@ -280,8 +265,6 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
-    printf("%d: preprocess complete", idx);
-
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -445,7 +428,6 @@ void FORWARD::render(
 	float* out_plane_depth,
 	const bool render_geo)
 {
-    printf("=== DEBUG: Entering void FORWARD::render ===\n");
 	renderCUDA<NUM_CHANNELS,NUM_ALL_MAP> << <grid, block >> > (
 		ranges,
 		point_list,
@@ -466,14 +448,6 @@ void FORWARD::render(
 		out_all_map,
 		out_plane_depth,
 		render_geo);
-	cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        // Print the error before returning
-        printf("[DEBUG] Error after renderCUDA kernel: %s\n", cudaGetErrorString(err));
-    }
-    else {
-        printf("[DEBUG] renderCUDA finished successfully.\n");
-    }
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -502,7 +476,6 @@ void FORWARD::preprocess(int P, int D, int M,
 	uint32_t* tiles_touched,
 	bool prefiltered)
 {
-    printf("=== DEBUG: Entering FORWARD::preprocess");
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
 		means3D,
@@ -530,13 +503,4 @@ void FORWARD::preprocess(int P, int D, int M,
 		tiles_touched,
 		prefiltered
 		);
-
-	cudaError_t err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        // Print the error before returning
-        printf("[DEBUG] Error after preprocessCUDA kernel: %s\n", cudaGetErrorString(err));
-    }
-    else {
-        printf("[DEBUG] preprocessCUDA finished successfully.\n");
-    }
 }

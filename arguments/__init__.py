@@ -121,7 +121,7 @@ class OptimizationParams(ParamGroup):
 
         self.scale_loss_weight = 100.0
         self.wo_image_weight = False
-        self.single_view_weight = 0.015
+        self.single_view_weight = 0.010
         self.single_view_weight_from_iter = 7000
 
         self.opacity_threshold_coarse = 0.005
@@ -142,6 +142,8 @@ class OptimizationParams(ParamGroup):
         self.weight_decay_iteration = 5000
         self.pruning_from_iter = 500
         self.pruning_interval = 100
+
+        self.w_coefs_lambda = 0.0075
         
         super().__init__(parser, "Optimization Parameters")
 

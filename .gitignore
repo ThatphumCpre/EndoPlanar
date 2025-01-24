@@ -1,0 +1,32 @@
+# --------------------------------------
+# Python bytecode and cache
+# --------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --------------------------------------
+# Virtual Environments
+# --------------------------------------
+venv/
+.venv/
+env/
+ENV/
+
+# In case you use poetry or pipenv, you might also want to ignore:
+# .venv    # for local venv in Poetry
+# .env     # for local venv in Pipenv
+
+# --------------------------------------
+# Output / Build folders
+# --------------------------------------
+output/
+build/
+dist/
+
+# --------------------------------------
+# Other common ignores
+# --------------------------------------
+# Environment or config files
+.env
+*.log

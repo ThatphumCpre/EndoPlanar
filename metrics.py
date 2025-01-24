@@ -76,6 +76,13 @@ def readImages(renders_dir, gt_dir, depth_dir, gtdepth_dir, masks_dir):
     masks = []
     
     for fname in os.listdir(renders_dir):
+        # if fname.is_dir():
+        #     # Skip directories (e.g., .ipynb_checkpoints)
+        #     continue
+        # (Optionally) skip non-image files by extension:
+        _, ext = os.path.splitext(fname)
+        if ext.lower() not in [".png", ".jpg", ".jpeg", ".bmp", ".tiff"]:
+            continue
         render = np.array(Image.open(renders_dir / fname))
         gt = np.array(Image.open(gt_dir / fname))
         depth = np.array(Image.open(depth_dir / fname))
@@ -141,7 +148,7 @@ def evaluate(model_paths):
                     if (gt_depth!=0).sum() < 10:
                         continue
                     rmses.append(rmse(depth, gt_depth, mask))
-
+                print(psnrs)
                 print("Scene: ", scene_dir,  "SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
                 print("Scene: ", scene_dir,  "PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean(), ".5"))
                 print("Scene: ", scene_dir,  "LPIPS: {:>12.7f}".format(torch.tensor(lpipss).mean(), ".5"))

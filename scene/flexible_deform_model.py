@@ -230,7 +230,9 @@ class GaussianModel:
         # sigma for control shape of a basis
         shape_coefs = torch.zeros((N, self.args.ch_num, self.args.curve_num)) + self.args.init_param
         # stack them
+        print(weight_coefs.shape, position_coefs.shape, shape_coefs.shape)
         _coefs = torch.stack((weight_coefs, position_coefs, shape_coefs), dim=2).reshape(N,-1).float().to("cuda")
+        print(_coefs.shape)
         # Now shape is (N, ch_num, 3, curve_num)
         self._coefs = nn.Parameter(_coefs.requires_grad_(True))
         
@@ -570,10 +572,11 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
-        new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
+        new_opacities = self._opacity[selected_pts_mask].repeat(N,1)
         new_coefs = self._coefs[selected_pts_mask].repeat(N,1)
+        new_deformation_table = self._deformation_table[selected_pts_mask].repeat(N)
 
-        self.densification_postfix(new_xyz, new_coefs, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_coefs, new_deformation_table)
         # del original ones, note that this is possible due to we concat the new one (append it at the back)
         # so the N first indexes are not changing => can use this mask and del them via prune_points directly
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
@@ -610,8 +613,9 @@ class GaussianModel:
             new_scaling = self._scaling[selected_pts_mask]
             new_rotation = self._rotation[selected_pts_mask]
             new_coefs    = self._coefs[selected_pts_mask]
+            new_deformation_table = self._deformation_table[selected_pts_mask]
 
-            self.densification_postfix(new_xyz, new_coefs, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
+            self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_coefs, new_deformation_table)
 
     # call prune_points with prune_mask = (self.get_opacity < min_opacity).squeeze()
     def prune(self, max_grad, abs_max_grad, min_opacity, extent, max_screen_size):
@@ -652,6 +656,12 @@ class GaussianModel:
 
     # called when training to catch the gradient
     def add_densification_stats(self, viewspace_point_tensor, viewspace_point_tensor_abs, update_filter):
+        # print(viewspace_point_tensor)
+        # print(viewspace_point_tensor_abs)
+        # print(update_filter)
+        # print("grad on python side updated via autograd")
+        # print(self._coefs.grad.sum(), self._scaling.grad.sum(), self._xyz.grad.sum())
+        # print(viewspace_point_tensor.grad.sum(), viewspace_point_tensor_abs.grad.sum())
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.xyz_gradient_accum_abs[update_filter] += torch.norm(viewspace_point_tensor_abs.grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1

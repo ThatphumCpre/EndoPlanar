@@ -61,7 +61,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         all_maps,
         raster_settings,
     ):
-
+        if raster_settings.debug: print("CUSTOM FWD CALLED", flush=True)
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg, #0
@@ -86,7 +86,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.render_geo,#19
             raster_settings.debug#20
         )
-
+        if raster_settings.debug: print(means3D.sum(), scales.sum(), rotations.sum())
         # Invoke C++/CUDA rasterizer
         if raster_settings.debug:
             cpu_args = cpu_deep_copy_tuple(args) # Copy them before they can be corrupted
@@ -100,17 +100,19 @@ class _RasterizeGaussians(torch.autograd.Function):
             num_rendered, color, radii, out_observe, out_all_map, out_plane_depth, geomBuffer, binningBuffer, imgBuffer = _C.rasterize_gaussians(*args)
 
         # Keep relevant tensors for backward
+        
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(out_all_map, colors_precomp, all_maps, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
+        if raster_settings.debug: print("\noutput color.sum() this call", color.sum(), flush=True)
         return color, radii, out_observe, out_all_map, out_plane_depth
 
     @staticmethod
     def backward(ctx, grad_out_color, grad_radii, grad_out_observe, grad_out_all_map, grad_out_plane_depth):
-
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
+        if raster_settings.debug: print("AUTOGRAD CALL THIS CLASS BACKWARD", flush=True)
         all_map_pixels, colors_precomp, all_maps, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
@@ -167,7 +169,13 @@ class _RasterizeGaussians(torch.autograd.Function):
             gard_all_map,
             None,
         )
-
+        # if raster_settings.debug:
+        #     print("DEBUG GRADIENT RETURN FROM KERNEL", flush=True)
+        #     for x in grads:
+        #         if x is not None:
+        #             print(x.sum(), flush=True)
+        #         else:
+        #             print(None, flush=True)
         return grads
 
 class GaussianRasterizationSettings(NamedTuple):

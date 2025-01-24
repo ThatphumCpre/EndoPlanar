@@ -12,8 +12,16 @@ OptimizationParams = dict(
     single_view_weight_from_iter = 700,
     percent_dense = 0.01,
     opacity_reset_interval = 3000,
-    position_lr_max_steps = 4000,
-    prune_interval = 3000
+    position_lr_max_steps = 7000,
+    prune_interval = 3000,
+    w_coefs_lambda = 0.01,
+    wo_image_weight = True,
+    single_view_weight = 0.01
+
+    # feature_lr = 0.005,
+    # opacity_lr = 0.075,
+    # scaling_lr = 0.01,
+    # rotation_lr = 0.0025,
 )
 
 ModelHiddenParams = dict(

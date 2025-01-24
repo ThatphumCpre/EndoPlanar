@@ -32,9 +32,15 @@ def gen_pseudo_pcd_gt(rgb, depth, K, pose, depth_scale=1., depth_truc=3., depth_
     """
     if depth_filter is not None:
          depth = cv2.bilateralFilter(depth, depth_filter[0], depth_filter[1], depth_filter[2])
+    if isinstance(depth, torch.Tensor):
+        depth = depth.detach().cpu().numpy()
+    if isinstance(rgb, torch.Tensor):
+        rgb = rgb.detach().cpu().numpy()
+        rgb = np.transpose(rgb, (1, 2, 0))
+        print(rgb.shape)
     h, w = rgb.shape[:-1]
     rgb_im = o3d.geometry.Image(rgb.astype(np.uint8))
-    depth_im = o3d.geometry.Image(depth)
+    depth_im = o3d.geometry.Image(depth.astype(np.float32))
     rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
         rgb_im, 
         depth_im, 
@@ -109,6 +115,7 @@ to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background,  voxel_size, num_cluster,\
     no_fine, render_test=False, reconstruct=False, crop_size=0, max_depth=5.0, volume=None, use_depth_filter=False):
+
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
@@ -117,6 +124,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     mesh_path = os.path.join(model_path, name, "ours_{}".format(iteration), "meshs")
     processed_mesh_path = os.path.join(model_path, name, "ours_{}".format(iteration), "processed_meshs")
     normal_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normals")
+    dnorm = os.path.join(model_path, name, "ours_{}".format(iteration), "dnormals")
 
     makedirs(render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
@@ -126,6 +134,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(mesh_path, exist_ok=True)
     makedirs(processed_mesh_path, exist_ok=True)
     makedirs(normal_path, exist_ok=True)
+    makedirs(dnorm, exist_ok=True)
     
     render_images = []
     render_depths = []
@@ -134,6 +143,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     mask_list = []
     pseudo_gt_pcds = []
     depths_tsdf_fusion = []
+    depth_normals = []
     normals = []
     count = 0
 
@@ -145,14 +155,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         K = get_intrinsics(view)
         pose = view.world_view_transform.inverse().cpu().numpy()  # shape [4,4]
         # TODO: add apply mask
-        pseudo_pcd_gt = gen_pseudo_pcd_gt(gt_rgb, gt_depth, K, pose)
+        # pseudo_pcd_gt = gen_pseudo_pcd_gt(gt_rgb, gt_depth, K, pose)
 
         # render
         rendering = render(view, gaussians, pipeline, background)
         render_rgb = rendering["render"].cpu()
-        depth = rendering["plane_depth"].squeeze()
+        depth = rendering["plane_depth"]
         depth_tsdf = depth.clone()
-        depth = depth.detach().cpu().numpy()
 
         # PGSR normalize?
         # depth_i = (depth - depth.min()) / (depth.max() - depth.min() + 1e-20)
@@ -164,10 +173,17 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         normal = normal.detach().cpu().numpy()
         normal = ((normal+1) * 127.5).astype(np.uint8).clip(0, 255)
 
+        dnormal = rendering["depth_normal"].permute(1,2,0)
+        dnormal = dnormal/(dnormal.norm(dim=-1, keepdim=True)+1.0e-8)
+        dnormal = dnormal.detach().cpu().numpy()
+        dnormal = ((dnormal+1) * 127.5).astype(np.uint8).clip(0, 255)
+        depth_normals.append(dnormal)
+
         # reject depth measurements for pixels whose surface normal is too oblique relative to the camera’s viewing direction. This often corresponds to areas where the geometry is nearly parallel to the line of sight
         if use_depth_filter:
             view_dir = torch.nn.functional.normalize(view.get_rays(), p=2, dim=-1)
             depth_normal = rendering["depth_normal"].permute(1,2,0)
+            
             depth_normal = torch.nn.functional.normalize(depth_normal, p=2, dim=-1)
             dot = torch.sum(view_dir*depth_normal, dim=-1).abs()
             angle = torch.acos(dot)
@@ -180,55 +196,71 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask = view.mask
             mask_list.append(mask)
             gt_depths.append(gt_depth)
-            pseudo_gt_pcds.append(pseudo_pcd_gt)
+            # pseudo_gt_pcds.append(pseudo_pcd_gt)
             normals.append(normal)
+            render_images.append(render_rgb)
+            render_depths.append(depth)
     
-        volume = o3d.pipelines.integration.ScalableTSDFVolume(
-                voxel_length=voxel_size,
-                sdf_trunc=4.0*voxel_size,
-                color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8)
+        # volume = o3d.pipelines.integration.ScalableTSDFVolume(
+        #         voxel_length=voxel_size,
+        #         sdf_trunc=4.0*voxel_size,
+        #         color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8)
 
-        depths_tsdf_fusion = torch.stack(depths_tsdf_fusion, dim=0)
-        for idx, view in enumerate(tqdm(views, desc="TSDF Fusion progress")):
-            ref_depth = depths_tsdf_fusion[idx].cuda()
+        # tensor_depths_tsdf_fusion = torch.stack(depths_tsdf_fusion, dim=0)
+        # # print(depths_tsdf_fusion.shape)
+        # # print(len(views))
+        # for idx, ref_depth in enumerate(tqdm(tensor_depths_tsdf_fusion, desc="TSDF Fusion progress")):
+        #     # print(ref_depth)
+        #     ref_depth = ref_depth.cuda()
+    
+        #     if view.mask is not None:
+        #         ref_depth[view.mask.squeeze() < 0.5] = 0
+        #     ref_depth[ref_depth>max_depth] = 0
+        #     ref_depth = ref_depth.detach().cpu().numpy()
+            
+        #     pose = np.identity(4)
+        #     pose[:3,:3] = view.R.transpose(-1,-2)
+        #     pose[:3, 3] = view.T
+        #     # color = o3d.io.read_image(os.path.join(render_path, view.image_name + ".jpg"))
+        #     color = gt_rgb.detach().cpu().numpy()
+        #     color = color.transpose(1, 2, 0)  # from [C,H,W] to [H,W,C]
+        #     color = color.astype(np.uint8)
+        #     color = np.ascontiguousarray(color)  # enforce row-major (C) layout
+            
+        #     color = o3d.geometry.Image(color)
+        #     depth = o3d.geometry.Image((ref_depth*1000).astype(np.uint16))
+        #     rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+        #         color, depth, depth_scale=1000.0, depth_trunc=max_depth, convert_rgb_to_intensity=False)
 
-            if view.mask is not None:
-                ref_depth[view.mask.squeeze() < 0.5] = 0
-            ref_depth[ref_depth>max_depth] = 0
-            ref_depth = ref_depth.detach().cpu().numpy()
+        #     w = view.image_width
+        #     h = view.image_height
+        #     fx = w / (2.0 * np.tan(view.FoVx / 2.0))  # focal length x
+        #     fy = h / (2.0 * np.tan(view.FoVy / 2.0))  # focal length y
+        #     volume.integrate(
+        #         rgbd,
+        #         o3d.camera.PinholeCameraIntrinsic(view.image_width, view.image_height, fx, fy, view.image_width/2.0, view.image_height/2.0),
+        #         pose)
             
-            pose = np.identity(4)
-            pose[:3,:3] = view.R.transpose(-1,-2)
-            pose[:3, 3] = view.T
-            color = o3d.io.read_image(os.path.join(render_path, view.image_name + ".jpg"))
-            depth = o3d.geometry.Image((ref_depth*1000).astype(np.uint16))
-            rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
-                color, depth, depth_scale=1000.0, depth_trunc=max_depth, convert_rgb_to_intensity=False)
-            volume.integrate(
-                rgbd,
-                o3d.camera.PinholeCameraIntrinsic(view.image_width, view.image_height, view.Fx, view.Fy, view.Cx, view.Cy),
-                pose)
-            
-        mesh = volume.extract_triangle_mesh()
+        # mesh = volume.extract_triangle_mesh()
         
-        o3d.io.write_triangle_mesh(os.path.join(mesh_path, '{0:05d}'.format(count) + "tsdf_fusion.ply") , mesh,
-                                    write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
+        # o3d.io.write_triangle_mesh(os.path.join(mesh_path, '{0:05d}'.format(count) + "tsdf_fusion.ply") , mesh,
+        #                             write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
         
-        processed_mesh = post_process_mesh(mesh, num_cluster)
-        o3d.io.write_triangle_mesh(os.path.join(processed_mesh_path, '{0:05d}'.format(count) + "tsdf_fusion.ply"), processed_mesh, 
-                                    write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
+        # processed_mesh = post_process_mesh(mesh, num_cluster)
+        # o3d.io.write_triangle_mesh(os.path.join(processed_mesh_path, '{0:05d}'.format(count) + "tsdf_fusion.ply"), processed_mesh, 
+        #                             write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
         count += 1
 
-    if render_test:
-        test_times = 20
-        for i in range(test_times):
-            for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-                if idx == 0 and i == 0:
-                    time1 = time()
-                stage = 'coarse' if no_fine else 'fine'
-                rendering = render(view, gaussians, pipeline, background)
-        time2=time()
-        print("FPS:",(len(views)-1)*test_times/(time2-time1))
+    # if render_test:
+    #     test_times = 20
+    #     for i in range(test_times):
+    #         for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+    #             if idx == 0 and i == 0:
+    #                 time1 = time()
+    #             stage = 'coarse' if no_fine else 'fine'
+    #             rendering = render(view, gaussians, pipeline, background)
+    #     time2=time()
+    #     print("FPS:",(len(views)-1)*test_times/(time2-time1))
     
     count = 0
     print("writing training images.")
@@ -259,6 +291,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             image = np.clip(image.cpu().squeeze().numpy().astype(np.uint8), 0, 255)
             cv2.imwrite(os.path.join(depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
+    count = 0
+    if len(depth_normals) != 0:
+        print("writing rendered normal images from depth .")
+        for image in tqdm(depth_normals):
+            # image = np.clip(image.cpu().squeeze().numpy().astype(np.uint8), 0, 255)
+            cv2.imwrite(os.path.join(dnorm, '{0:05d}'.format(count) + ".jpg"), image)
+            count += 1
     
     count = 0
     print("writing gt depth images.")
@@ -269,10 +308,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             count += 1
 
     count = 0
-    print("writing gt normal images.")
+    print("writing normal images.")
     if len(normals) != 0:
         for image in tqdm(normals):
-            image = image.cpu().squeeze().numpy().astype(np.uint8)
             cv2.imwrite(os.path.join(normal_path, '{0:05d}'.format(count) + ".jpg"), image)
             count += 1
             
@@ -293,7 +331,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print('file name:', name)
         reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, crop_size)
 
-def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,
+def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool,
                  max_depth : float, voxel_size : float, num_cluster: int, use_depth_filter : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree, hyperparam)
@@ -305,11 +343,13 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
+            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, voxel_size, num_cluster, False, reconstruct=reconstruct_train)
+    #         render_set(model_path, name, iteration, views, gaussians, pipeline, background,  voxel_size, num_cluster,\
+    # no_fine, render_test=False, reconstruct=False, crop_size=0, max_depth=5.0, volume=None, use_depth_filter=False):
         if not skip_test:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, voxel_size, num_cluster, False, reconstruct=reconstruct_test, crop_size=20)
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
+            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, voxel_size, num_cluster, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
 
 def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, crop_left_size=0):
     import cv2
@@ -374,6 +414,10 @@ if __name__ == "__main__":
     parser.add_argument("--reconstruct_test", action="store_true")
     parser.add_argument("--reconstruct_video", action="store_true")
     parser.add_argument("--configs", type=str)
+    parser.add_argument("--voxel_size", default=0.002, type=float)
+    parser.add_argument("--num_cluster", default=1, type=int)
+    parser.add_argument("--use_depth_filter", action="store_true")
+    parser.add_argument("--max_depth", default=5.0, type=float)
     args = get_combined_args(parser)
     print("Rendering ", args.model_path)
     if args.configs:
@@ -386,4 +430,6 @@ if __name__ == "__main__":
     render_sets(model.extract(args), hyperparam.extract(args), args.iteration, 
         pipeline.extract(args), 
         args.skip_train, args.skip_test, args.skip_video,
-        args.reconstruct_train,args.reconstruct_test,args.reconstruct_video)
+        args.max_depth, args.voxel_size, args.num_cluster, args.use_depth_filter,
+        args.reconstruct_train, args.reconstruct_test, args.reconstruct_video)
+    

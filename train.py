@@ -53,6 +53,73 @@ class ViewpointDataset(Dataset):
         # Return the viewpoint at this index
         return self.viewpoint_stack[index]
 
+def get_depth_grad_weight(depth_map, beta=2.0):
+    """
+    Compute a gradient-based weight map for a single-channel depth map.
+    The returned gradient weight is normalized to [0, 1] and padded with 1.0 
+    at the borders, following the same steps as the original get_img_grad_weight.
+
+    Args:
+        depth_map (torch.Tensor): Single-channel depth, shape [H, W].
+        beta (float): Optional exponent to apply to the gradient map.
+
+    Returns:
+        torch.Tensor: Gradient-based weight, shape [H, W].
+    """
+
+    # 1) Get the shape.
+    #    Must be [H, W].
+    if depth_map.ndim != 2:
+        raise ValueError(f"Expected 2D depth map [H, W], got shape {depth_map.shape}")
+    H, W = depth_map.shape
+
+    # 2) Sample neighboring pixels (skipping the boundary by 1px).
+    bottom_point = depth_map[2:H,   1:W-1]  # shape [H-2, W-2]
+    top_point    = depth_map[0:H-2, 1:W-1]
+    right_point  = depth_map[1:H-1, 2:W]
+    left_point   = depth_map[1:H-1, 0:W-2]
+
+    # 3) Compute horizontal (grad_img_x) and vertical (grad_img_y) gradient magnitudes.
+    grad_img_x = torch.abs(right_point - left_point)  # [H-2, W-2]
+    grad_img_y = torch.abs(top_point - bottom_point)  # [H-2, W-2]
+
+    # 4) Combine them by taking the maximum (same as original).
+    #    We'll temporarily add a channel dim so we can use torch.cat + max like the original.
+    grad_img_x = grad_img_x.unsqueeze(0)   # [1, H-2, W-2]
+    grad_img_y = grad_img_y.unsqueeze(0)   # [1, H-2, W-2]
+    grad_img = torch.cat((grad_img_x, grad_img_y), dim=0)  # [2, H-2, W-2]
+    grad_img, _ = torch.max(grad_img, dim=0)               # [H-2, W-2]
+
+    # 5) Normalize to [0, 1].
+    min_val = grad_img.min()
+    max_val = grad_img.max()
+    # Add a small epsilon in the denominator to avoid division by zero
+    grad_img = (grad_img - min_val) / (max_val - min_val + 1e-8)
+
+    # 6) Optionally apply an exponent, if beta != 1.0.
+    if beta != 1.0:
+        grad_img = grad_img ** beta
+
+    # 7) Pad with 1.0 around the boundary, matching the original code's style.
+    #    After padding, shape becomes [H, W].
+    grad_img = F.pad(grad_img.unsqueeze(0).unsqueeze(0), (1,1,1,1), value=1.0).squeeze()
+
+    return grad_img
+
+def get_pseudo_normal(x, mask):
+    
+    # x: N, C, H, W
+    mask = mask[..., 1:, 1:] & mask[..., 1:, :-1] & mask[..., :-1, 1:]
+    diff_x = x[..., 1:, 1:] - x[..., 1:, :-1]
+    diff_y = x[..., 1:, 1:] - x[..., :-1, 1:]
+    z = torch.ones_like(diff_x)
+    normal = torch.cat([diff_x, -diff_y, -z], dim=1)
+    normal = F.normalize(normal, dim=1)
+    normal = normal*mask
+    # cv2.imwrite('norm.png', ((normal+1)/2*255).squeeze(0).permute(1,2,0).detach().cpu().numpy().astype(np.uint8))
+    # cv2.imwrite('mask.png', (mask*255).squeeze(0).permute(1,2,0).detach().cpu().numpy().astype(np.uint8))
+
+    return normal
 
 def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations, 
                          checkpoint_iterations, checkpoint, debug_from,
@@ -84,10 +151,13 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     """
     video_cams = scene.getVideoCameras()
     
+    # if not viewpoint_stack:
+    #     # same format as video_cams but sampling for training
+    #     # list Camera
+    #     viewpoint_stack = scene.getTrainCameras()
     if not viewpoint_stack:
-        # same format as video_cams but sampling for training
-        # list Camera
-        viewpoint_stack = scene.getTrainCameras()
+        viewpoint_stack = scene.getTrainCameras().copy()
+    # viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
         
     for iteration in range(first_iter, final_iter+1):        
 
@@ -100,8 +170,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # sampling one idx/time_step in dataset
         # seem like stocastic GD with batch size 1?
         # ???? epoch ????
-        idx = randint(0, len(viewpoint_stack)-1)
-        viewpoint_cams = [viewpoint_stack[idx]]
+        # idx = randint(0, len(viewpoint_stack)-1)
+        # viewpoint_cams = [viewpoint_stack[idx]]
+        if not viewpoint_stack:
+            viewpoint_stack = scene.getTrainCameras().copy()
+        viewpoint_cams = [viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))]
 
         # Render
         if (iteration - 1) == debug_from:
@@ -132,6 +205,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                             return_plane=True, return_depth_normal=True)
             image, viewspace_point_tensor, visibility_filter, radii = \
                 render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+
+            # print('\nsum and mean of color image on python', render_pkg["render"].sum(), render_pkg["render"].mean())
+            # print('\nsum and mean of render_pkg["radii"] on python', render_pkg["radii"].sum(), render_pkg["radii"].mean())
+            # print('\nsum and mean of render_pkg["plane_depth"] on python', render_pkg["plane_depth"].sum(), render_pkg["plane_depth"].mean())
         
             gt_image = viewpoint_cam.original_image.cuda().float()
             gt_depth = viewpoint_cam.original_depth.cuda().float()
@@ -153,7 +230,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # written like it can be multiple scene trained it one iteration, but actually was one ...
         radii = torch.cat(radii_list,0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
-        image_tensor = torch.cat(images,0)
+        image_tensor = torch.cat(images,0).requires_grad_(True)
         depth_tensor = torch.cat(depths, 0)
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
@@ -161,6 +238,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         normal = torch.cat(normals, 0)
         depth_normal = torch.cat(depth_normals, 0)
+
+        if iteration == 2:
+            print(gt_depth_tensor.shape, mask_tensor.shape, depth_tensor.shape)
         
         # abs error
         Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
@@ -175,35 +255,83 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # abs error but depth
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
 
-        # scale loss
+        # # scale loss
+        scaling_loss = 0
         if visibility_filter.sum() > 0:
             # TODO: change get_scaling to deform_scaling
             # deform = exp(self._scale + sum(basis*weight)) >= 0
             scale = scales_final[visibility_filter]
             sorted_scale, _ = torch.sort(scale, dim=-1)
             min_scale_loss = sorted_scale[...,0]
+            # print(min_scale_loss)
             scaling_loss = opt.scale_loss_weight * min_scale_loss.mean()
-
         # single-view loss
         normal_loss = 0
         if iteration > opt.single_view_weight_from_iter:
             weight = opt.single_view_weight
-
-            image_weight = (1.0 - get_img_grad_weight(gt_image))
-            image_weight = (image_weight).clamp(0,1).detach() ** 2
+            
+            color_grad_mask = get_img_grad_weight(gt_image)   # shape [H, W]
+            depth_grad_mask = get_depth_grad_weight(gt_depth) # shape [H, W]
+        
+            color_weight = (1.0 - color_grad_mask).clamp(0,1).detach()
+            depth_weight = (1.0 - depth_grad_mask).clamp(0,1).detach()
+        
+            # weighted normal difference
+            # edge_aware_weight = depth_weight ** 2
+            edge_aware_weight = (0.5 * depth_weight + 0.5 * color_weight) ** 2
+                
             if not opt.wo_image_weight:
-                # image_weight = erode(image_weight[None,None]).squeeze()
-                normal_loss = weight * (image_weight * (((depth_normal - normal)).abs().sum(0))).mean()
+                normal_loss = 1.5 * weight * (
+                    edge_aware_weight * ((depth_normal - normal).abs().sum(dim=0))
+                ).mean()
+                # normal_loss = weight * (
+                #     edge_aware_weight * ((depth_normal - normal).abs().sum(dim=0))
+                # ).mean()
             else:
-                normal_loss = weight * (((depth_normal - normal)).abs().sum(0)).mean()
+                normal_loss = weight * ((depth_normal - normal).abs().sum(dim=0)).mean()
+
+        # # single-view loss
+        # normal_loss = 0
+        # if iteration > opt.single_view_weight_from_iter:
+        #     weight = opt.single_view_weight
+
+        #     depth_weight = (1.0 - get_img_grad_weight(gt_image))
+        #     depth_weight = (depth_weight).clamp(0,1).detach() 
+        #     image_weight = (1.0 - get_depth_grad_weight(gt_depth))
+        #     image_weight = (image_weight).clamp(0,1).detach() 
+
+        #     edge_aware_weight = (0.6*image_weight + 0.4*depth_weight)**2
+        #     if not opt.wo_image_weight:
+        #         # image_weight = erode(image_weight[None,None]).squeeze()
+        #         normal_loss = weight * (image_weight * (((depth_normal - normal)).abs().sum(0))).mean()
+        #     else:
+        #         normal_loss = weight * (((depth_normal - normal)).abs().sum(0)).mean()
         # catch psnr
         psnr_ = psnr(image_tensor, gt_image_tensor, mask_tensor).mean().double()
         
         # combine loss
-        loss = Ll1 + depth_loss + scaling_loss + normal_loss
+
+        # (N, ch_num, 3, curve_num). 3 are from (0) weight of each basis (1) (variance) (2) (mean)
+        # get weights of visible Guassian in this frame
+        coefs_weights_slice = gaussians._coefs.reshape(len(gaussians._xyz), gaussians.args.ch_num, 3, gaussians.args.curve_num)
+        coefs_weights_slice = coefs_weights_slice[visibility_filter, :, 0, :]
+        # add L2 regularization to force the Deformation function more smooth
+        coefs_l2_reg = opt.w_coefs_lambda * (coefs_weights_slice ** 2).mean()
         
+        loss = Ll1 + depth_loss + scaling_loss + normal_loss + coefs_l2_reg
+        
+        if iteration > 2000 and iteration%500 == 0:
+            print("Ll1: ", Ll1)
+            print("depth_loss: ", depth_loss)
+            print("scaling_loss: ", scaling_loss)
+            print("normal_loss: ", normal_loss)
+            print("coefs_l2_reg: ", coefs_l2_reg)
         # cal grad
+        # print(loss)
         loss.backward()
+
+        # print(image_tensor.requires_grad, image_tensor.sum())
+        # print("test render_image graident: ", image_tensor.grad.sum(), "\n\n\n")
 
         # seem like it tery to copy the grad out for further use?
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
@@ -239,7 +367,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 mask = (render_pkg["out_observe"] > 0) & visibility_filter
                 gaussians.max_radii2D[mask] = torch.max(gaussians.max_radii2D[mask], radii[mask])
                 viewspace_point_tensor_abs = render_pkg["viewspace_points_abs"]
-                gaussians.add_densification_stats(viewspace_point_tensor_grad, viewspace_point_tensor_abs, visibility_filter)
+                gaussians.add_densification_stats(render_pkg["viewspace_points"], viewspace_point_tensor_abs, visibility_filter)
                 # gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
 
                 # calculate thds for opacity prunning and densification

@@ -30,7 +30,6 @@ namespace cg = cooperative_groups;
 #include "forward.h"
 #include "backward.h"
 
-
 // Helper function to find the next-highest bit of the MSB
 // on the CPU.
 uint32_t getHigherMsb(uint32_t n)
@@ -225,12 +224,9 @@ int CudaRasterizer::Rasterizer::forward(
 	const bool render_geo,
 	bool debug)
 {
-
-    printf("=== DEBUG: Entering rasterization kernel setup ===\n");
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
-    printf("allocate something new that deform dont have\n");
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
@@ -240,8 +236,6 @@ int CudaRasterizer::Rasterizer::forward(
 		radii = geomState.internal_radii;
 	}
 
-    printf("allocate something new complete\n");
-    printf("allocate thread block dim3 structure \n");
 	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);
 	dim3 block(BLOCK_X, BLOCK_Y, 1);
 
@@ -255,12 +249,7 @@ int CudaRasterizer::Rasterizer::forward(
 		throw std::runtime_error("For non-RGB, provide precomputed Gaussian colors!");
 	}
 
-    printf("allocate thread block dim3 structure complete\n");
-    printf("=== DEBUG: Launching myKernel with grid=(%d,%d), block=(%d,%d) ===\n", 
-       tile_grid.x, tile_grid.y, block.x, block.y);
-
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
-    debug = true;
 	CHECK_CUDA(FORWARD::preprocess(
 		P, D, M,
 		means3D,
@@ -286,35 +275,15 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered
-	), debug);
-    printf("forward preprocess complete\n");
-    CHECK_CUDA(cudaDeviceSynchronize(), debug);
-    printf("forward preprocess really finished\n");
-    
-    // Compute prefix sum over touched tiles
-    CHECK_CUDA(cub::DeviceScan::InclusiveSum(
-        geomState.scanning_space,
-        geomState.scan_size,
-        geomState.tiles_touched,
-        geomState.point_offsets,
-        P
-    ), debug);
-    
-    // Force sync to catch any error in prefix sum
-    CHECK_CUDA(cudaDeviceSynchronize(), debug);
-    
-    // Check final duplicates count
-    int num_rendered = 0;
-    CHECK_CUDA(cudaMemcpy(
-        &num_rendered,
-        geomState.point_offsets + (P - 1),
-        sizeof(int),
-        cudaMemcpyDeviceToHost
-    ), debug);
-    
-    printf("[DEBUG] num_rendered (total duplicates) = %d\n", num_rendered);
-    
-    CHECK_CUDA(cudaDeviceSynchronize(), debug);
+	), debug)
+
+	// Compute prefix sum over full list of touched tile counts by Gaussians
+	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
+	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
+
+	// Retrieve total number of Gaussian instances to launch and resize aux buffers
+	int num_rendered;
+	CHECK_CUDA(cudaMemcpy(&num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost), debug);
 
 	size_t binning_chunk_size = required<BinningState>(num_rendered);
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
