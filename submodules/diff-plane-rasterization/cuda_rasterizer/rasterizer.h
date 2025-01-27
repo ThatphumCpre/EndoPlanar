@@ -43,7 +43,8 @@ namespace CudaRasterizer
 			const float scale_modifier,
 			const float* rotations,
 			const float* cov3D_precomp,
-			const float* all_map,
+			float* all_map, // not const anymore
+			float* cached_neg_masks,
 			const float* viewmatrix,
 			const float* projmatrix,
 			const float* cam_pos,
@@ -55,7 +56,7 @@ namespace CudaRasterizer
 			float* out_all_map,
 			float* out_plane_depth,
 			const bool render_geo,
-			bool debug = false);
+			bool debug);
 
 		static void backward(
 			const int P, int D, int M, int R,
@@ -66,6 +67,7 @@ namespace CudaRasterizer
 			const float* shs,
 			const float* colors_precomp,
 			const float* all_maps,
+			const float* cached_neg_masks,
 			const float* scales,
 			const float scale_modifier,
 			const float* rotations,
@@ -77,7 +79,7 @@ namespace CudaRasterizer
 			const int* radii,
 			char* geom_buffer,
 			char* binning_buffer,
-			char* image_buffer,
+			char* img_buffer,
 			const float* dL_dpix,
 			const float* dL_dout_all_map,
 			const float* dL_dout_plane_depth,

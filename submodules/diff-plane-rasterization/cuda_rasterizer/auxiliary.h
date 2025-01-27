@@ -202,10 +202,10 @@ void invertOrthonormalView4x4(const float* M_in, float* M_out)
 {
     // For reference, in column-major:
     //
-    // M_in.m[ 0] = R^T_{0,0}, M_in.m[ 4] = R^T_{0,1}, M_in.m[ 8] = R^T_{0,2}, M_in.m[12] = -R^T*C_x
-    // M_in.m[ 1] = R^T_{1,0}, M_in.m[ 5] = R^T_{1,1}, M_in.m[ 9] = R^T_{1,2}, M_in.m[13] = -R^T*C_y
-    // M_in.m[ 2] = R^T_{2,0}, M_in.m[ 6] = R^T_{2,1}, M_in.m[10] = R^T_{2,2}, M_in.m[14] = -R^T*C_z
-    // M_in.m[ 3] = 0.0f,      M_in.m[ 7] = 0.0f,      M_in.m[11] = 0.0f,      M_in.m[15] = 1.0f
+    // M_in[ 0] = R^T_{0,0}, M_in[ 4] = R^T_{0,1}, M_in[ 8] = R^T_{0,2}, M_in[12] = -R^T*C_x
+    // M_in[ 1] = R^T_{1,0}, M_in[ 5] = R^T_{1,1}, M_in[ 9] = R^T_{1,2}, M_in[13] = -R^T*C_y
+    // M_in[ 2] = R^T_{2,0}, M_in[ 6] = R^T_{2,1}, M_in[10] = R^T_{2,2}, M_in[14] = -R^T*C_z
+    // M_in[ 3] = 0.0f,      M_in[ 7] = 0.0f,      M_in[11] = 0.0f,      M_in[15] = 1.0f
     //
     // We want M_out = M_in^{-1}, which for an orthonormal view is:
     //    [ R    C ]
@@ -213,33 +213,33 @@ void invertOrthonormalView4x4(const float* M_in, float* M_out)
     // Where R = (R^T)^T, and C = -R * t, with t = last column of M_in.
 
     // 1) Extract R^T from M_in:
-    float rtx0 = M_in.m[0],  rtx1 = M_in.m[4],  rtx2 = M_in.m[ 8];
-    float rty0 = M_in.m[1],  rty1 = M_in.m[5],  rty2 = M_in.m[ 9];
-    float rtz0 = M_in.m[2],  rtz1 = M_in.m[6],  rtz2 = M_in.m[10];
+    float rtx0 = M_in[0],  rtx1 = M_in[4],  rtx2 = M_in[ 8];
+    float rty0 = M_in[1],  rty1 = M_in[5],  rty2 = M_in[ 9];
+    float rtz0 = M_in[2],  rtz1 = M_in[6],  rtz2 = M_in[10];
 
-    // 2) Extract translation t = -R^T*C = (M_in.m[12], M_in.m[13], M_in.m[14])
+    // 2) Extract translation t = -R^T*C = (M_in[12], M_in[13], M_in[14])
     //    (since M_in is world->camera).
-    float tx = M_in.m[12];
-    float ty = M_in.m[13];
-    float tz = M_in.m[14];
+    float tx = M_in[12];
+    float ty = M_in[13];
+    float tz = M_in[14];
 
     // 3) Compute R = (R^T)^T:
     //    R_{0,0} = rtx0, R_{0,1} = rty0, R_{0,2} = rtz0, etc.
     //    We'll place it directly into M_out in column-major:
-    M_out.m[ 0] = rtx0;  // R_{0,0}
-    M_out.m[ 1] = rty0;  // R_{1,0}
-    M_out.m[ 2] = rtz0;  // R_{2,0}
-    M_out.m[ 3] = 0.0f;
+    M_out[ 0] = rtx0;  // R_{0,0}
+    M_out[ 1] = rty0;  // R_{1,0}
+    M_out[ 2] = rtz0;  // R_{2,0}
+    M_out[ 3] = 0.0f;
 
-    M_out.m[ 4] = rtx1;  // R_{0,1}
-    M_out.m[ 5] = rty1;  // R_{1,1}
-    M_out.m[ 6] = rtz1;  // R_{2,1}
-    M_out.m[ 7] = 0.0f;
+    M_out[ 4] = rtx1;  // R_{0,1}
+    M_out[ 5] = rty1;  // R_{1,1}
+    M_out[ 6] = rtz1;  // R_{2,1}
+    M_out[ 7] = 0.0f;
 
-    M_out.m[ 8] = rtx2;  // R_{0,2}
-    M_out.m[ 9] = rty2;  // R_{1,2}
-    M_out.m[10] = rtz2;  // R_{2,2}
-    M_out.m[11] = 0.0f;
+    M_out[ 8] = rtx2;  // R_{0,2}
+    M_out[ 9] = rty2;  // R_{1,2}
+    M_out[10] = rtz2;  // R_{2,2}
+    M_out[11] = 0.0f;
 
     // 4) Compute the camera center C in world space:
     //    We have t = - R^T C  =>  C = - R * t
@@ -249,10 +249,10 @@ void invertOrthonormalView4x4(const float* M_in, float* M_out)
     float Cz = -(rtz0*tx + rtz1*ty + rtz2*tz);
 
     // Place in last column of M_out:
-    M_out.m[12] = Cx;  // camera center x
-    M_out.m[13] = Cy;  // camera center y
-    M_out.m[14] = Cz;  // camera center z
-    M_out.m[15] = 1.0f;
+    M_out[12] = Cx;  // camera center x
+    M_out[13] = Cy;  // camera center y
+    M_out[14] = Cz;  // camera center z
+    M_out[15] = 1.0f;
 }
 
 __device__ __forceinline__
