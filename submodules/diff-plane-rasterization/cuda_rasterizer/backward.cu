@@ -839,7 +839,7 @@ void BACKWARD::preprocess(
 	const float* dL_dconic,
 	glm::vec3* dL_dmean3D,
 	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot
+	glm::vec4* dL_drot,
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
