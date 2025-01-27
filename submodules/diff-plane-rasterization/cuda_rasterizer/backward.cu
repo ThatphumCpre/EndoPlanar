@@ -340,6 +340,203 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 	*dL_drot = float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w };//dnormvdv(float4{ rot.x, rot.y, rot.z, rot.w }, float4{ dL_dq.x, dL_dq.y, dL_dq.z, dL_dq.w });
 }
 
+__device__ void computeInputAllMap(
+	int idx,
+	const float* viewmatrix,
+	const float3* mean,
+	const float3* scale,
+	const glm::vec4 rot,
+	const float* input_all_maps,
+	const float* neg_masks,
+	const float* dL_dall_map,
+	glm::vec3* dL_dmeans, glm::vec4* dL_drots
+){
+	// calculate gradient flowed from local_distance
+	glm::vec3 local_normal {
+		input_all_maps[5*idx + 0],
+		input_all_maps[5*idx + 1],
+		input_all_maps[5*idx + 2],
+	};
+	float3 pts_in_cam = transformPoint4x3(mean3D, viewmatrix);
+	// local_distance = | local_normal @ pts_in_cam |
+	// given local_normal @ pts_in_cam = D, 
+	// dlocal_distance_dD = sign(D) using piecewise constant approach
+	float dlocal_distance_dD = sign(local_normal.x*pts_in_cam.x + local_normal.y*pts_in_cam.y + local_normal.z*pts_in_cam.z);
+	// dL_dlocal_normal_from_dist = dL_dlocal_distance * dlocal_distance_dD * pts_in_cam
+	// since dL_dlocal_distance for guassians[idx] stored in dL_dall_map[idx][4], we got
+	float dL_ddist = dL_dall_map[5*idx + 4];
+	glm::vec3 dL_dlocal_normal_from_dist {
+		dL_ddist * dlocal_distance_dD * pts_in_cam.x,
+		dL_ddist * dlocal_distance_dD * pts_in_cam.y,
+		dL_ddist * dlocal_distance_dD * pts_in_cam.z
+	};
+	// in the same manner as dL_dlocal_normal_from_dist, we got
+	// dL_dpts_in_cam = dL_dall_map[idx][4] * dlocal_distance_dD * local_normal
+	glm::vec3 dL_dpts_in_cam {
+		dL_ddist * dlocal_distance_dD * local_normal.x,
+		dL_ddist * dlocal_distance_dD * local_normal.y,
+		dL_ddist * dlocal_distance_dD * local_normal.z
+	};
+
+	// calculate gradient flowed from local_normal
+	glm::vec3 dL_dlocal_normal_direct {
+		dL_dall_map[5*idx + 0],
+		dL_dall_map[5*idx + 1],
+		dL_dall_map[5*idx + 2],
+	};
+	// accumulate gradient with dL_dlocal_normal_from_dist
+	glm::vec3 dL_dlocal_normal_tot = dL_dlocal_normal_from_dist + dL_dlocal_normal_direct;
+
+	// now we ready to calculate gradient that flo through mean and rotation
+	// dL_dmean = dL_dmean + dL_dmean_this_path
+	// NOTE: we treat neg_mask as piecewise constant. Hence no gradient flow through mean from local_normal path
+	// 		 the gradient only propagate through pts_in_cam path. Hence,
+	// dL_dmean_this_path = dL_dpts_in_cam * dpts_in_cam_dmean = dL_dpts_in_cam * Rc
+	glm::vec3 dL_dmean_this_path {
+		// NOTE: please check, seem weird potentially can be wrong
+		viewmatrix[0] * dL_dpts_in_cam.x + viewmatrix[4] * dL_dpts_in_cam.y + viewmatrix[8] * dL_dpts_in_cam.z,
+		viewmatrix[1] * dL_dpts_in_cam.x + viewmatrix[5] * dL_dpts_in_cam.y + viewmatrix[9] * dL_dpts_in_cam.z,
+		viewmatrix[2] * dL_dpts_in_cam.x + viewmatrix[6] * dL_dpts_in_cam.y + viewmatrix[10] * dL_dpts_in_cam.z,
+	};
+
+	dL_dmeans[idx] += dL_dmean_this_path;
+
+	
+	// select rotation axis
+	float min_val = scale.x;
+    int arg_min = 0;
+    if (scale.y < min_val) {
+        min_val = scale.y;
+        arg_min = 1;
+    }
+    if (scale.z < min_val) {
+        min_val = scale.z;
+        arg_min = 2;
+    }
+
+	// dL_dlocal_normal_tot*dlocal_normal_dR*dR_dquan
+	// local = neg_mask * Rc * R[:, argmin]
+	// dlocal_dR_argmin = neg_mask * (Rc * dRargmin/dRargmin) = neg_mask * (Rc * I)
+	// dlocal_dR = neg_mask * Rc 
+	// (note that Rc is column major=> idx 0,1,2 is column 0) 
+	// => dlocal_dR[i][argmin] = [viewmatrix[0+3i] , viewmatrix[1+3i] , viewmatrix[2+3i]]
+	// TODO: please check correctness
+    int c = arg_min;
+
+    // Partial wrt rotation columns
+    // -------------------------------------------
+    // local_normal = neg_mask * viewmatrix3x3 * R[:, c]
+    // the part that flows back from local_normal to the matrix is:
+    //   d(local_normal)/d(R[i][c]) => neg_mask * viewmatrix3x3:::: R[i][c] is real scalr
+    //	 dlocal_dR[i][c] = [viewmatrix[0+3i] , viewmatrix[1+3i] , viewmatrix[2+3i]] => d(local_normal.x)/d(R[i][c]), d(local_normal.y)/d(R[i][c]), d(local_normal.z)/d(R[i][c])
+    // NOTE: viewmatrix is column major:
+
+    float nm = neg_masks[idx];
+
+    glm::vec3 partialR0c = nm*glm::vec3(viewmatrix[0], viewmatrix[1], viewmatrix[2]);   // partial wrt R[0][c]
+    glm::vec3 partialR1c = nm*glm::vec3(viewmatrix[4], viewmatrix[5], viewmatrix[6]);   // partial wrt R[1][c]
+    glm::vec3 partialR2c = nm*glm::vec3(viewmatrix[8], viewmatrix[9], viewmatrix[10]);  // partial wrt R[2][c]
+
+    // Dot each with dL_dlocal_normal_tot => how L changes w.r.t R[i][c]
+    float dL_dR0c = glm::dot(dL_dlocal_normal_tot, partialR0c);
+    float dL_dR1c = glm::dot(dL_dlocal_normal_tot, partialR1c);
+    float dL_dR2c = glm::dot(dL_dlocal_normal_tot, partialR2c);
+
+    // quaternion chain rule: dR[i][c]/d{w,x,y,z}
+    float w = rot.w, x = rot.x, y = rot.y, z = rot.z;
+
+    float dL_dw = 0.f, dL_dx = 0.f, dL_dy = 0.f, dL_dz = 0.f;
+
+    if (c == 0) {
+        // column0 => (R00, R10, R20)
+        //   R00=1 - 2(y^2 + z^2), R10=2(xy + wz), R20=2(xz - wy)
+        // => partial wrt w:
+        float dR00_dw = 0.f;          // R00 has no w
+        float dR10_dw = 2.f*z;        // from w*z
+        float dR20_dw = -2.f*y;       // from -(w*y)
+        dL_dw += dL_dR0c*dR00_dw + dL_dR1c*dR10_dw + dL_dR2c*dR20_dw;
+
+        // => partial wrt x:
+        float dR00_dx = 0.f;          // no x in R00
+        float dR10_dx = 2.f*y;        // from x*y
+        float dR20_dx = 2.f*z;        // from x*z
+        dL_dx += dL_dR0c*dR00_dx + dL_dR1c*dR10_dx + dL_dR2c*dR20_dx;
+
+        // => partial wrt y:
+        float dR00_dy = -4.f*y;       // from -2*(y^2)
+        float dR10_dy = 2.f*x;        // from x*y
+        float dR20_dy = -2.f*w;       // from -(w*y)
+        dL_dy += dL_dR0c*dR00_dy + dL_dR1c*dR10_dy + dL_dR2c*dR20_dy;
+
+        // => partial wrt z:
+        float dR00_dz = -4.f*z;       // from -2*(z^2)
+        float dR10_dz = 2.f*w;        // from w*z
+        float dR20_dz = 2.f*x;        // from x*z
+        dL_dz += dL_dR0c*dR00_dz + dL_dR1c*dR10_dz + dL_dR2c*dR20_dz;
+
+    } else if (c == 1) {
+        // column1 => (R01, R11, R21)
+        //   R01=2(xy - wz), R11=1-2(x^2+z^2), R21=2(yz + wx)
+
+        // partial wrt w
+        float dR01_dw = -2.f*z;
+        float dR11_dw = 0.f;
+        float dR21_dw = 2.f*x;
+        dL_dw += dL_dR0c*dR01_dw + dL_dR1c*dR11_dw + dL_dR2c*dR21_dw;
+
+        // partial wrt x
+        float dR01_dx = 2.f*y;        // from x*y
+        float dR11_dx = -4.f*x;       // from -(2*x^2)
+        float dR21_dx = 2.f*w;        // from w*x
+        dL_dx += dL_dR0c*dR01_dx + dL_dR1c*dR11_dx + dL_dR2c*dR21_dx;
+
+        // partial wrt y
+        float dR01_dy = 2.f*x;
+        float dR11_dy = 0.f;
+        float dR21_dy = 2.f*z;
+        dL_dy += dL_dR0c*dR01_dy + dL_dR1c*dR11_dy + dL_dR2c*dR21_dy;
+
+        // partial wrt z
+        float dR01_dz = -2.f*w;
+        float dR11_dz = -4.f*z;
+        float dR21_dz = 2.f*y;
+        dL_dz += dL_dR0c*dR01_dz + dL_dR1c*dR11_dz + dL_dR2c*dR21_dz;
+
+    } else {
+        // c == 2 => (R02, R12, R22)
+        //   R02=2(xz + wy), R12=2(yz - wx), R22=1 - 2(x^2 + y^2)
+
+        // partial wrt w
+        float dR02_dw = 2.f*y;        // from w*y
+        float dR12_dw = -2.f*x;       // from -(w*x)
+        float dR22_dw = 0.f;
+        dL_dw += dL_dR0c*dR02_dw + dL_dR1c*dR12_dw + dL_dR2c*dR22_dw;
+
+        // partial wrt x
+        float dR02_dx = 2.f*z;        // from x*z
+        float dR12_dx = -2.f*w;       // from -(w*x)
+        float dR22_dx = -4.f*x;       // from -2*(x^2)
+        dL_dx += dL_dR0c*dR02_dx + dL_dR1c*dR12_dx + dL_dR2c*dR22_dx;
+
+        // partial wrt y
+        float dR02_dy = 2.f*w;        // from w*y
+        float dR12_dy = 2.f*z;        // from y*z
+        float dR22_dy = -4.f*y;       // from -2*(y^2)
+        dL_dy += dL_dR0c*dR02_dy + dL_dR1c*dR12_dy + dL_dR2c*dR22_dy;
+
+        // partial wrt z
+        float dR02_dz = 2.f*x;
+        float dR12_dz = 2.f*y;
+        float dR22_dz = 0.f;
+        dL_dz += dL_dR0c*dR02_dz + dL_dR1c*dR12_dz + dL_dR2c*dR22_dz;
+    }
+
+    // 8) Accumulate into global dL_drots
+    // -------------------------------------------
+    dL_drots[idx] += glm::vec4(dL_dx, dL_dy, dL_dz, dL_dw);
+	// NOTE: no gradient flow to scaling since we treat neg_mask as piece_wise constant
+}
+
 // Backward pass of the preprocessing steps, except
 // for the covariance computation and inversion
 // (those are handled by a previous kernel call)
@@ -355,13 +552,16 @@ __global__ void preprocessCUDA(
 	const float scale_modifier,
 	const float* proj,
 	const glm::vec3* campos,
+	const float* input_all_maps,
+	const float* cached_neg_masks,
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	glm::vec4* dL_drot,
+	const float* dL_dall_map)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
@@ -393,6 +593,11 @@ __global__ void preprocessCUDA(
 	// Compute gradient updates due to computing covariance from scale/rotation
 	if (scales)
 		computeCov3D(idx, scales[idx], scale_modifier, rotations[idx], dL_dcov3D, dL_dscale, dL_drot);
+	
+	if (input_all_maps)
+		// mean, 
+		computeInputAllMap(idx,viewmatrix,means[idx],scales[idx],rotations[idx],input_all_maps,neg_masks,dL_dall_map,dL_dmeans,dL_drots)
+
 }
 
 // Backward version of the rendering procedure.
@@ -628,14 +833,18 @@ void BACKWARD::preprocess(
 	const float focal_x, float focal_y,
 	const float tan_fovx, float tan_fovy,
 	const glm::vec3* campos,
+	const float* input_all_maps,
+	const float* cached_neg_masks,
 	const float3* dL_dmean2D,
 	const float* dL_dconic,
 	glm::vec3* dL_dmean3D,
+	glm::vec3* dL_dscale,
+	glm::vec4* dL_drot
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
-	glm::vec3* dL_dscale,
-	glm::vec4* dL_drot)
+	float* dL_dall_map
+)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
@@ -669,13 +878,17 @@ void BACKWARD::preprocess(
 		scale_modifier,
 		projmatrix,
 		campos,
+		input_all_maps,
+		cached_neg_masks,
 		(float3*)dL_dmean2D,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
 		dL_dcov3D,
 		dL_dsh,
 		dL_dscale,
-		dL_drot);
+		dL_drot,
+		dL_dall_map
+		);
 }
 
 void BACKWARD::render(

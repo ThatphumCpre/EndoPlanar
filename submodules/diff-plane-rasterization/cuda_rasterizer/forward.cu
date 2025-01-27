@@ -115,7 +115,7 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 // Forward method for converting scale and rotation properties of each
 // Gaussian to a 3D covariance matrix in world space. Also takes care
 // of quaternion normalization.
-__device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 rot, float* cov3D)
+__device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::mat3& R, float* cov3D)
 {
 	// Create scaling matrix
 	glm::mat3 S = glm::mat3(1.0f);
@@ -123,22 +123,7 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 	S[1][1] = mod * scale.y;
 	S[2][2] = mod * scale.z;
 
-	// Normalize quaternion to get valid rotation
-	glm::vec4 q = rot;// / glm::length(rot);
-	float r = q.x;
-	float x = q.y;
-	float y = q.z;
-	float z = q.w;
-
-	// Compute rotation matrix from quaternion
-	glm::mat3 R = glm::mat3(
-		1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
-		2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
-		2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
-	);
-
 	glm::mat3 M = S * R;
-
 	// Compute 3D world covariance matrix Sigma
 	glm::mat3 Sigma = glm::transpose(M) * M;
 
@@ -149,6 +134,66 @@ __device__ void computeCov3D(const glm::vec3 scale, float mod, const glm::vec4 r
 	cov3D[3] = Sigma[1][1];
 	cov3D[4] = Sigma[1][2];
 	cov3D[5] = Sigma[2][2];
+}
+
+// compute InputAllMap
+__device__ void computeInputAllMap(
+	const glm::vec3& mean3D,
+	const glm::vec3& scale,
+	const glm::mat3& R,
+	const float* viewmatrix,
+	float* input_all_map,
+	float* cached_neg_mask
+){
+	// Find arg_min of scale
+	float min_val = scale.x;
+    int arg_min = 0;
+    if (scale.y < min_val) {
+        min_val = scale.y;
+        arg_min = 1;
+    }
+    if (scale.z < min_val) {
+        min_val = scale.z;
+        arg_min = 2;
+    }
+	// Use arg_min to gather global normal vector from rotation matrix
+	glm::vec3 global_normal{
+		R[0][arg_min],
+		R[1][arg_min],
+		R[2][arg_min],
+	};
+	// Align direction with camera
+	// First, Transform camera-space origin (0,0,0) to world space => camera_center
+	float view_inv[16];
+	invertOrthonormalView4x4(viewmatrix, view_inv);
+	float3 camera_center = transformPoint4x3(make_float3(0,0,0), view_inv);
+	glm::vec3 gaussian_to_cam_global {
+		camera_center.x - mean3D.x,
+		camera_center.y - mean3D.y,
+		camera_center.z - mean3D.z,
+	};
+	// If normal is point to the opposite deirection to the camera (dot product return negative)
+	// rotate it 180 degree by multiply by -1
+	neg_mask = sign(glm::dot(global_normal, gaussian_to_cam_global));
+	global_normal = neg_mask * global_normal;
+
+	// create local_normal by matmal with camera->world
+	float3 local_normal = transform3x3(global_normal, viewmatrix);
+
+	// calculate local_distance
+	float3 pts_in_cam = transformPoint4x3(mean3D, viewmatrix);
+	// dot(local_normal, pts_in_cam)
+	float local_distance = local_normal.x*pts_in_cam.x + local_normal.y*pts_in_cam.y + local_normal.z*pts_in_cam.z;
+	if (local_distance < 0.0f) local_distance = -1*local_distance
+	input_all_map[0] = local_normal.x;
+	input_all_map[1] = local_normal.y;
+	input_all_map[2] = local_normal.z;
+	input_all_map[3] = 1.0f;
+	input_all_map[4] = local_distance;
+
+	// TODO: need to cache neg_mask since it computation expensive
+	cached_neg_mask[0] = neg_mask;
+	// arg_min, R, pts_in_cam are very cheap, so we dont need to cache them
 }
 
 // Perform initial steps for each Gaussian prior to rasterization.
@@ -170,6 +215,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float tan_fovx, float tan_fovy,
 	const float focal_x, float focal_y,
 	int* radii,
+	float* input_all_map,
+	float* cached_neg_masks,
 	float2* points_xy_image,
 	float* depths,
 	float* cov3Ds,
@@ -199,6 +246,21 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
 
+	// Precompute Rotation Matrix for computeCov3D and computeInputAllMap
+	// Normalize quaternion to get valid rotation
+	glm::vec4 q = rotations[idx];// / glm::length(rot);
+	float r = q.x;
+	float x = q.y;
+	float y = q.z;
+	float z = q.w;
+
+	// Compute rotation matrix from quaternion
+	glm::mat3 R = glm::mat3(
+		1.f - 2.f * (y * y + z * z), 2.f * (x * y - r * z), 2.f * (x * z + r * y),
+		2.f * (x * y + r * z), 1.f - 2.f * (x * x + z * z), 2.f * (y * z - r * x),
+		2.f * (x * z - r * y), 2.f * (y * z + r * x), 1.f - 2.f * (x * x + y * y)
+	);
+
 	// If 3D covariance matrix is precomputed, use it, otherwise compute
 	// from scaling and rotation parameters. 
 	const float* cov3D;
@@ -208,10 +270,17 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 	else
 	{
-		computeCov3D(scales[idx], scale_modifier, rotations[idx], cov3Ds + idx * 6);
+		computeCov3D(scales[idx], scale_modifier, R, cov3Ds + idx * 6);
 		cov3D = cov3Ds + idx * 6;
 	}
 
+	// Compute input all map
+	glm::vec3 mean3D {
+		orig_points[3 * idx],
+		orig_points[3 * idx + 1],
+		orig_points[3 * idx + 2]
+	};
+	computeInputAllMap(mean3D, scales[idx], R, viewmatrix, input_all_map + idx * 5, cached_neg_masks + idx)
 	// Compute 2D screen-space covariance matrix
 	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
 
@@ -467,6 +536,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float focal_x, float focal_y,
 	const float tan_fovx, float tan_fovy,
 	int* radii,
+	float* input_all_map,
+	float* cached_neg_masks,
 	float2* means2D,
 	float* depths,
 	float* cov3Ds,
@@ -494,6 +565,8 @@ void FORWARD::preprocess(int P, int D, int M,
 		tan_fovx, tan_fovy,
 		focal_x, focal_y,
 		radii,
+		input_all_map,
+		cached_neg_masks,
 		means2D,
 		depths,
 		cov3Ds,

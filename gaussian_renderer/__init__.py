@@ -70,9 +70,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # Set up rasterization configuration
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
-    camera_center = viewpoint_camera.camera_center.cuda()
-    world_view_transform = viewpoint_camera.world_view_transform.cuda()
-    full_proj_transform = viewpoint_camera.full_proj_transform.cuda()
     raster_settings = PlaneGaussianRasterizationSettings(
             image_height=int(viewpoint_camera.image_height),
             image_width=int(viewpoint_camera.image_width),
@@ -80,10 +77,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             tanfovy=tanfovy,
             bg=bg_color,
             scale_modifier=scaling_modifier,
-            viewmatrix=world_view_transform,
-            projmatrix=full_proj_transform,
+            viewmatrix=viewpoint_camera.world_view_transform,
+            projmatrix=viewpoint_camera.full_proj_transform,
             sh_degree=pc.active_sh_degree,
-            campos=camera_center,
+            campos=viewpoint_camera.camera_center,
             prefiltered=False,
             render_geo=return_plane,
             debug=pipe.debug
@@ -194,18 +191,19 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # print(rotations_final.shape, rotations_final.device)
     # print(input_all_map.shape, input_all_map.device)
     # # print(cov3D_precomp.shape, cov3D_precomp.device)
-    camera_center = viewpoint_camera.camera_center.cuda()
-    world_view_transform = viewpoint_camera.world_view_transform.cuda()
+    # camera_center = viewpoint_camera.camera_center.cuda()
+    # world_view_transform = viewpoint_camera.world_view_transform.cuda()
 
-    global_normal = pc.get_normal(means3D_final, scales_final, rotations_final, camera_center)
-    local_normal = global_normal @ world_view_transform[:3,:3]
-    pts_in_cam = means3D_final @ world_view_transform[:3,:3] + world_view_transform[3,:3]
-    depth_z = pts_in_cam[:, 2]
-    local_distance = (local_normal * pts_in_cam).sum(-1).abs()
-    input_all_map = torch.zeros((means3D_final.shape[0], 5)).cuda().float()
-    input_all_map[:, :3] = local_normal
-    input_all_map[:, 3] = 1.0
-    input_all_map[:, 4] = local_distance
+    # global_normal = pc.get_normal(means3D_final, scales_final, rotations_final, camera_center)
+    # local_normal = global_normal @ world_view_transform[:3,:3]
+    # pts_in_cam = means3D_final @ world_view_transform[:3,:3] + world_view_transform[3,:3]
+    # depth_z = pts_in_cam[:, 2]
+    # # local_normal @ pts_in_cam
+    # local_distance = (local_normal * pts_in_cam).sum(-1).abs()
+    # input_all_map = torch.zeros((means3D_final.shape[0], 5)).cuda().float()
+    # input_all_map[:, :3] = local_normal
+    # input_all_map[:, 3] = 1.0
+    # input_all_map[:, 4] = local_distance
     
 
     rendered_image, radii, out_observe, out_all_map, plane_depth = rasterizer(
@@ -217,7 +215,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             opacities = opacity_final,
             scales = scales_final,
             rotations = rotations_final,
-            all_map = input_all_map,
+            # all_map = input_all_map,
             cov3D_precomp = cov3D_precomp)
 
     rendered_normal = out_all_map[0:3]

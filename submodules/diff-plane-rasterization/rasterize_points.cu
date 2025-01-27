@@ -32,6 +32,8 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
+// NUM_CHANNELS, NUM_ALL_MAP, BLOCK_X, BLOCK_Y are defined in config.h
+
 std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
@@ -42,7 +44,6 @@ RasterizeGaussiansCUDA(
 	const torch::Tensor& rotations,
 	const float scale_modifier,
 	const torch::Tensor& cov3D_precomp,
-	const torch::Tensor& all_map,
 	const torch::Tensor& viewmatrix,
 	const torch::Tensor& projmatrix,
 	const float tan_fovx, 
@@ -67,6 +68,10 @@ RasterizeGaussiansCUDA(
   auto int_opts = means3D.options().dtype(torch::kInt32);
   auto float_opts = means3D.options().dtype(torch::kFloat32);
 
+  torch::Tensor in_all_map = torch::full({P, NUM_ALL_MAP}, 0, float_opts);
+  torch::Tensor cached_neg_masks = torch::full({P}, 0, float_opts);
+
+  // allocate memory for output
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   torch::Tensor out_observe = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
@@ -106,7 +111,8 @@ RasterizeGaussiansCUDA(
 		scale_modifier,
 		rotations.contiguous().data_ptr<float>(),
 		cov3D_precomp.contiguous().data<float>(), 
-		all_map.contiguous().data<float>(), 
+		in_all_map.contiguous().data<float>(), 
+		cached_neg_masks.contiguous().data<float>(),
 		viewmatrix.contiguous().data<float>(), 
 		projmatrix.contiguous().data<float>(),
 		campos.contiguous().data<float>(),
@@ -121,7 +127,7 @@ RasterizeGaussiansCUDA(
 		render_geo,
 		debug);
   }
-  return std::make_tuple(rendered, out_color, radii, out_observe, out_all_map, out_plane_depth, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, out_color, radii, out_observe, in_all_map, cached_neg_masks, out_all_map, out_plane_depth, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -132,6 +138,7 @@ RasterizeGaussiansBackwardCUDA(
 	const torch::Tensor& radii,
     const torch::Tensor& colors,
 	const torch::Tensor& all_maps,
+	const torch::Tensor& cached_neg_masks,
 	const torch::Tensor& scales,
 	const torch::Tensor& rotations,
 	const float scale_modifier,
@@ -185,6 +192,7 @@ RasterizeGaussiansBackwardCUDA(
 	  sh.contiguous().data<float>(),
 	  colors.contiguous().data<float>(),
 	  all_maps.contiguous().data<float>(),
+	  cached_neg_masks.contiguous().data<float>(),
 	  scales.data_ptr<float>(),
 	  scale_modifier,
 	  rotations.data_ptr<float>(),

@@ -19,6 +19,7 @@
 #include "device_launch_parameters.h"
 #include <cub/cub.cuh>
 #include <cub/device/device_radix_sort.cuh>
+// <glm/gtc/matrix_transform.hpp>
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
 
@@ -210,7 +211,8 @@ int CudaRasterizer::Rasterizer::forward(
 	const float scale_modifier,
 	const float* rotations,
 	const float* cov3D_precomp,
-	const float* all_map,
+	float* all_map, // not const anymore
+	float* cached_neg_masks,
 	const float* viewmatrix,
 	const float* projmatrix,
 	const float* cam_pos,
@@ -267,6 +269,8 @@ int CudaRasterizer::Rasterizer::forward(
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		radii,
+		all_map,
+		cached_neg_masks,
 		geomState.means2D,
 		geomState.depths,
 		geomState.cov3D,
@@ -360,6 +364,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* shs,
 	const float* colors_precomp,
 	const float* all_maps,
+	const float* cached_neg_masks,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
@@ -452,12 +457,15 @@ void CudaRasterizer::Rasterizer::backward(
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		(glm::vec3*)campos,
+		all_maps,
+		cached_neg_masks,
 		(float3*)dL_dmean2D,
 		dL_dconic,
 		(glm::vec3*)dL_dmean3D,
+		(glm::vec3*)dL_dscale,
+		(glm::vec4*)dL_drot, 
 		dL_dcolor,
 		dL_dcov3D,
 		dL_dsh,
-		(glm::vec3*)dL_dscale,
-		(glm::vec4*)dL_drot), debug)
+		dL_dall_map), debug)
 }
