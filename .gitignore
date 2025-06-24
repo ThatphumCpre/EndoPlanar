@@ -1,32 +1,29 @@
-# --------------------------------------
-# Python bytecode and cache
-# --------------------------------------
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Python Cache
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
 
-# --------------------------------------
-# Virtual Environments
-# --------------------------------------
-venv/
-.venv/
-env/
-ENV/
-
-# In case you use poetry or pipenv, you might also want to ignore:
-# .venv    # for local venv in Poetry
-# .env     # for local venv in Pipenv
-
-# --------------------------------------
-# Output / Build folders
-# --------------------------------------
+# Output & Cache
 output/
-build/
-dist/
+outputs/
+.cache/
+*.cache
 
-# --------------------------------------
-# Other common ignores
-# --------------------------------------
-# Environment or config files
+# PyTorch3D
+*.pth
+*.pt
+*.ckpt
+checkpoints/
+
+# Environment
 .env
-*.log

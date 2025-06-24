@@ -169,7 +169,6 @@ def evaluate(model_paths):
             with open(scene_dir + "/per_view.json", 'w') as fp:
                 json.dump(per_view_dict[scene_dir], fp, indent=True)
 
-
 if __name__ == "__main__":
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
