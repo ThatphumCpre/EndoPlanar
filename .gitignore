@@ -1,0 +1,29 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Output & Cache
+output/
+outputs/
+.cache/
+*.cache
+
+# PyTorch3D
+*.pth
+*.pt
+*.ckpt
+checkpoints/
+
+# Environment
+.env
