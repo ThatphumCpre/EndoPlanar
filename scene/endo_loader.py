@@ -216,9 +216,7 @@ class EndoNeRF_Dataset(object):
         else:
             idxs = self.video_idxs
 
-        sharp_metric = "/".join(self.image_paths[0].split("/")[:-2]) + "/sharp_metric.mp4"
-        #print(sharp_metric)
-        cap = cv2.VideoCapture(sharp_metric)
+        
         
         for idx in tqdm(idxs):
             # mask / depth
@@ -249,15 +247,11 @@ class EndoNeRF_Dataset(object):
             FovX = focal2fov(self.focal[0], self.img_wh[0])
             FovY = focal2fov(self.focal[1], self.img_wh[1])
 
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-
-            # Read the frame
-            ret, frame = cap.read()
         
             
             cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, depth=depth, mask=mask, gt_alpha_mask=None,
                           image_name=f"{idx}", uid=idx, data_device=torch.device("cuda"), time=time,
-                          Znear=None, Zfar=None, K=self.K, h=self.img_wh[1], w=self.img_wh[0], sharp_metric=frame))
+                          Znear=None, Zfar=None, K=self.K, h=self.img_wh[1], w=self.img_wh[0]))
         return cameras
     
     def filling_pts_colors(self, filling_mask, ref_depth, ref_image):

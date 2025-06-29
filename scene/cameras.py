@@ -24,7 +24,7 @@ class Camera(nn.Module):
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
                  data_device = "cuda", time = 0, Znear=None, Zfar=None, 
-                 K=None, h=None, w=None, sharp_metric=None
+                 K=None, h=None, w=None
                  ):
         super(Camera, self).__init__()
 
@@ -45,41 +45,7 @@ class Camera(nn.Module):
             self.data_device = torch.device("cuda")
         
         self.original_image = image.clamp(0.0, 1.0)
-        # if image_path is not None:
-            
-        #     cache_path = ".".join(image_path.split(".")[:-1]) + ".npy"
-        #     name_path = ".".join(image_path.split(".")[:-1]) 
-        #     if not os.path.exists(cache_path):  
-        #         image_np = self.original_image.cpu().numpy() * 255
-        #         image_np = image_np.astype(np.uint8)  # Ensure it's in the correct type
-        
-        #         hwc_image = np.transpose(image_np, (1, 2, 0))
-        #         gray_from_bgr = cv2.cvtColor(hwc_image, cv2.COLOR_BGR2GRAY)
-        
-        #         sharp_map = blur_detector.detectBlur(
-        #             gray_from_bgr,
-        #             downsampling_factor=4,
-        #             num_scales=4,
-        #             scale_start=2,
-        #             num_iterations_RF_filter=3,
-        #             show_progress=False
-        #         )
-        #         sharp_map = torch.tensor(sharp_map).unsqueeze(0).repeat(3, 1, 1)
-        
-        #         # Save the computed sharpness map
-        #         np.save(name_path, sharp_map.numpy())
-        
-        #     else:  
-        #         # Load precomputed sharpness map
-        #         sharp_map = torch.tensor(np.load(cache_path, allow_pickle=True))
-        #print(sharp_metric.shape)
-        if sharp_metric is not None : 
-            sharp_map = np.transpose(sharp_metric/255, (2, 0, 1))
-            sharp_map = torch.tensor(sharp_map)
-            self.sharp_map = sharp_map
-        else :
-            self.sharp_map = torch.ones(3,512,640)
-        
+               
         self.original_depth = depth
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]

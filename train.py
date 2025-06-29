@@ -419,7 +419,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         loss = opt.color_weight*Ll1 +  opt.depth_weight*depth_loss + scaling_loss + tv_depth_loss + tv_color_loss + normal_loss #+ fourier_loss
         
         if iteration > 0 and iteration%500 == 0:
-            # print("Down weight Depth : ", depth_down_weight, sharp_maps_tensor.max())
+    
             print("fourier_loss: ", fourier_loss)
             print("Ll1: ", Ll1)
             print("depth_loss: ", depth_loss)
@@ -429,17 +429,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             print("tv_color_loss: ", tv_color_loss)
             # print("coefs_l2_reg: ", coefs_l2_reg)
             print("align_loss: ", align_loss)
-        # cal grad
-        # print(loss)
-        # try:
-        #     loss.retain_grad()
-        # except:
-        #     pass
+       
         loss.backward()
 
-        # print(image_tensor.requires_grad, image_tensor.sum())
-        # print("test render_image graident: ", image_tensor.grad.sum(), "\n\n\n")
-
+      
         # seem like it tery to copy the grad out for further use?
         # viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         # for idx in range(0, len(viewspace_point_tensor_list)):
