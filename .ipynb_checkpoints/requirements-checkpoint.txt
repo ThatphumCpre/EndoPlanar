@@ -1,9 +1,0 @@
-mmcv==1.6.0
-matplotlib
-argparse
-lpips
-plyfile
-imageio-ffmpeg
-open3d
-imageio
-pytorch3d
