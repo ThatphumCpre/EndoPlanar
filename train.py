@@ -274,8 +274,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         normals = []
         depth_normals = []
-        # scales_finals = []
-        sharp_maps = []
+      
         scales_final = torch.empty(0)
         
         for viewpoint_cam in viewpoint_cams:
@@ -301,7 +300,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             
             mask = viewpoint_cam.mask.cuda()
 
-            sharp_maps.append(sharp_map.unsqueeze(0))
+        
             images.append(image.unsqueeze(0))
             depths.append(render_pkg["plane_depth"].unsqueeze(0))
             gt_images.append(gt_image.unsqueeze(0))
@@ -322,7 +321,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         depth_tensor = torch.cat(depths, 0)
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
-        sharp_maps_tensor = torch.cat(sharp_maps, 0)
+   
         mask_tensor = torch.cat(masks, 0)
 
         normal = torch.cat(normals, 0)
@@ -333,14 +332,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if opt.clean_noise:
             gt_image_tensor = median_filter_3x3(gt_image_tensor)
         # abs error
-        if iteration > opt.sharp_metric_stop_iter : 
-            sharp_maps_tensor = torch.clamp(sharp_maps_tensor + 1, max=1)
-        if opt.sharp:
-            Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor, sharp_map=F.softmax(sharp_maps_tensor, dim=1))
-            loss = Ll1.clone()
-        else:
-            Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
-            loss = Ll1.clone()
+        
+   
+        Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
+        loss = Ll1.clone()
         
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
@@ -359,7 +354,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             scale = scales_final[visibility_filter]
             sorted_scale, _ = torch.sort(scale, dim=-1)
             min_scale_loss = sorted_scale[...,0]
-            # print(min_scale_loss)
+
             scaling_loss = opt.scale_loss_weight * min_scale_loss.mean()
         # single-view loss
         normal_loss = 0
@@ -385,9 +380,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     normal_loss =  weight * (
                         edge_aware_weight * ((depth_normal - normal).abs().sum(dim=0))
                     ).mean()
-                # normal_loss = weight * (
-                #     edge_aware_weight * ((depth_normal - normal).abs().sum(dim=0))
-                # ).mean()
+                
             else:
                 if opt.regularize_geometry_only_mask:
                     normal_loss = weight * (torch.logical_not(mask) * ((depth_normal - normal).abs().sum(dim=0))).mean()
@@ -408,56 +401,21 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         
         if iteration > opt.align_loss_from_iter:
             cur = viewpoint_cam.time
-            # if iteration == 1:
-            # print(viewpoint_cam.time)
+          
             next_view =  get_closest_camera_by_time(global_view, cur)
-            # if iteration == 1:
-            # print(viewpoint_cam.time, next_view.time)
+           
             next_render_pkg = render(next_view, gaussians, pipe, background,
                             return_plane=True, return_depth_normal=True)
             weight = opt.align_loss_weight
             align_loss = weight * _align_loss(image_tensor, next_render_pkg["render"])
 
-        # # single-view loss
-        # normal_loss = 0
-        # if iteration > opt.single_view_weight_from_iter:
-        #     weight = opt.single_view_weight
-
-        #     depth_weight = (1.0 - get_img_grad_weight(gt_image))
-        #     depth_weight = (depth_weight).clamp(0,1).detach() 
-        #     image_weight = (1.0 - get_depth_grad_weight(gt_depth))
-        #     image_weight = (image_weight).clamp(0,1).detach() 
-
-        #     edge_aware_weight = (0.6*image_weight + 0.4*depth_weight)**2
-        #     if not opt.wo_image_weight:
-        #         # image_weight = erode(image_weight[None,None]).squeeze()
-        #         normal_loss = weight * (image_weight * (((depth_normal - normal)).abs().sum(0))).mean()
-        #     else:
-        #         normal_loss = weight * (((depth_normal - normal)).abs().sum(0)).mean()
-        # catch psnr
+       
         psnr_ = psnr(image_tensor, gt_image_tensor, mask_tensor).mean().double()
         psnr_dict[viewpoint_cam.time] = psnr_
         # combine loss
 
-        # (N, ch_num, 3, curve_num). 3 are from (0) weight of each basis (1) (variance) (2) (mean)
-        # get weights of visible Guassian in this frame
-        # coefs_weights_slice = gaussians._coefs.reshape(len(gaussians._xyz), gaussians.args.ch_num, 3, gaussians.args.curve_num)
-        # coefs_weights_slice = coefs_weights_slice[visibility_filter, :, 0, :]
-        # # add L2 regularization to force the Deformation function more smooth
-        # coefs_l2_reg = opt.w_coefs_lambda * (coefs_weights_slice ** 2).mean()
         fourier_loss = 0
-        # if iteration > opt.fft_from_iter:
-        #     fourier_loss = progressive_frequency_loss(
-        #                     image_tensor, gt_image_tensor, mask_tensor,
-        #                     iteration, opt.T0, opt.T,
-        #                     opt.fft_D0, opt.fft_D,
-        #                     w_l=opt.fft_weight_l, w_h=opt.fft_weight_h,
-        #                 )
-        # if opt.adpt_weight:
-        #     adpt = weights_dict.get(viewpoint_cam.time, 1)
-        #     Ll1 = adpt * Ll1
-        #     depth_loss = adpt * depth_loss
-        #     scaling_loss = adpt * scaling_loss
+
         loss = opt.color_weight*Ll1 +  opt.depth_weight*depth_loss + scaling_loss + tv_depth_loss + tv_color_loss + normal_loss #+ fourier_loss
         
         if iteration > 0 and iteration%500 == 0:
@@ -508,11 +466,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 scene.save(iteration, 'fine')
             timer.start()
             
-            # Densification
-            # opt.densify_until_iter: few last step we may not want to densify it anymore since it will need amount of iteration after doing it, 
-            #                         so, the last few step we focus on optimize it directly
-            # print(gaussians_sets[0]._xyz.grad)
-            # print("test: ", render_pkg["viewspace_points"].grad, "\n", render_pkg["viewspace_points_abs"].grad)
+        
             idx = gaussians_sets[0].get_xyz.shape[0]
             if iteration < opt.densify_until_iter :
                 # for gaussians in gaussians_sets:
@@ -549,49 +503,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 gaussians_sets[0].optimizer.step()
                 gaussians_sets[0].optimizer.zero_grad(set_to_none = True)
 
-            # if iteration < opt.densify_until_iter :
-            #     # for gaussians in gaussians_sets:
-            #     # Keep track of max radii in image-space for pruning
-            #     # this occur EVERY ITERATION , it catch the max radii2D for prunning
-            #     mask = ((render_pkg["out_observe"][idx:] > 0) & visibility_filter[idx:])
-            #     # print(mask.shape)
-            #     # print(radii.shape)
-            #     # print(radii[idx:][mask].shape)
-            #     # print(gaussians_sets[1].max_radii2D[mask].shape)
-            #     gaussians_sets[1].max_radii2D[mask] = (torch.max(gaussians_sets[1].max_radii2D[mask], radii[idx:][mask]))
-            #     viewspace_point_tensor_abs = render_pkg["viewspace_points_abs"].grad[idx:]
-            #     gaussians_sets[1].add_densification_stats(render_pkg["viewspace_points"].grad[idx:], viewspace_point_tensor_abs, render_pkg["opacity_final"][idx:], visibility_filter[idx:])
-            #     # gaussians_sets[1].add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
-
-            #     # calculate thds for opacity prunning and densification
-            #     # they are linear function that decrease over time. 
-            #     # prune_mask = (self.get_opacity < min_opacity).squeeze(): opacity_threshold decreasing => less prunning over time
-            #     opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
-            #     # torch.norm(grads, dim=-1) >= grad_threshold: grad_threshold decreasing => more densify over time
-            #     densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )
-            #     densify_threshold_abs = opt.densify_grad_threshold_abs_fine_init - iteration*(opt.densify_grad_threshold_abs_fine_init - opt.densify_grad_threshold_abs_after)/(opt.densify_until_iter )  
-
-            #     if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0:
-            #         size_threshold = 40 if iteration > opt.opacity_reset_interval else None
-            #         gaussians_sets[1].prune(densify_threshold, densify_threshold_abs, opacity_threshold, scene.cameras_extent, size_threshold)
-                    
-            #     if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 :
-            #         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-            #         gaussians_sets[1].densify(densify_threshold, densify_threshold_abs, opacity_threshold, scene.cameras_extent, size_threshold)
-                    
-            #     if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
-            #         print("\n\n\nreset opacity\n\n\n")
-            #         gaussians_sets[1].reset_opacity()
-                    
-            # # Optimizer step
-            # if iteration < opt.iterations:
-            #     gaussians_sets[1].optimizer.step()
-            #     gaussians_sets[1].optimizer.zero_grad(set_to_none = True)
-
-            # if (iteration in checkpoint_iterations):
-            #     print("\n[ITER {}] Saving Checkpoint".format(iteration))
-            #     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
-            
 
 def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname, extra_mark):
     tb_writer = prepare_output_and_logger(expname)
