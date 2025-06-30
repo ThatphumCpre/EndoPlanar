@@ -24,6 +24,8 @@ git clone https://github.com/your-repo/EndoPlanar.git
 cd EndoPlanar
 conda create -n EndoPlanar python=3.7 
 conda activate EndoPlanar
+pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu118
+pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
 
 pip install -r requirements.txt
 pip install -e submodules/depth-diff-gaussian-rasterization
@@ -32,7 +34,7 @@ pip install -e submodules/simple-knn
 
 ## Datasets
 
-We use 6 clips from [EndoNeRF](https://github.com/med-air/EndoNeRF) and 3 clips manually extracted from [StereoMIS](https://zenodo.org/records/7727692) to verify our method.
+We use 2 clips from [EndoNeRF](https://github.com/med-air/EndoNeRF) and 3 clips manually extracted from [StereoMIS](https://zenodo.org/records/7727692) to verify our method.
 
 To use the two available examples in [EndoNeRF](https://github.com/med-air/EndoNeRF) dataset. Please download the data via [this link](https://forms.gle/1VAqDJTEgZduD6157) and organize the data according to the [guideline](https://github.com/med-air/EndoNeRF.git).
 

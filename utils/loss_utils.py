@@ -19,9 +19,7 @@ from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
 # If you can, run this example on a GPU, it will be a lot faster.
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model = raft_large(weights=Raft_Large_Weights.DEFAULT, progress=False).to(device)
 # credit ====> deblur 4dgs
-from flow3d.pwcnet import PWCNet, get_backwarp
 import torch.nn as nn
 class AlignedLoss(nn.Module):
     def __init__ (self, loss_weight=1.0):

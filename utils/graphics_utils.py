@@ -71,14 +71,21 @@ def getProjectionMatrix(znear, zfar, fovX, fovY):
     return P
 
 def getProjectionMatrix2(znear, zfar, K, h, w):
+    # Convert inputs to PyTorch tensors to ensure type compatibility
+    znear = torch.tensor(znear, dtype=torch.float32)
+    zfar = torch.tensor(zfar, dtype=torch.float32)
+    K = torch.tensor(K, dtype=torch.float32) if not isinstance(K, torch.Tensor) else K.float()
+    h = torch.tensor(h, dtype=torch.float32)
+    w = torch.tensor(w, dtype=torch.float32)
+    
     near_fx = znear / K[0, 0]
     near_fy = znear / K[1, 1]
     left = - (w - K[0, 2]) * near_fx
     right = K[0, 2] * near_fx
     bottom = (K[1, 2] - h) * near_fy
     top = K[1, 2] * near_fy
-
-    P = torch.zeros(4, 4)
+    
+    P = torch.zeros(4, 4, dtype=torch.float32)
     z_sign = 1.0
     P[0, 0] = 2.0 * znear / (right - left)
     P[1, 1] = 2.0 * znear / (top - bottom)

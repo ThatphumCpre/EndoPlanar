@@ -296,7 +296,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         
             gt_image = viewpoint_cam.original_image.cuda().float()
             gt_depth = viewpoint_cam.original_depth.cuda().float()
-            sharp_map = viewpoint_cam.sharp_map.cuda().float()
+           
             
             mask = viewpoint_cam.mask.cuda()
 
